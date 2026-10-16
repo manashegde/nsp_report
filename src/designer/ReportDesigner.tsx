@@ -116,10 +116,12 @@ export const ReportDesigner = forwardRef<ReportDesignerHandle, ReportDesignerPro
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ds, JSON.stringify(t.dataFilters ?? {})]);
+  const dataFiltersKey = JSON.stringify(t.dataFilters ?? {});
   const fields = useMemo(() => {
-    const defs = ds ? getFields(ds) : [];
+    const defs = ds ? getFields(ds, t.dataFilters) : [];
     return flattenFields(defs.length ? defs : inferFields(sampleRows));
-  }, [ds, sampleRows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ds, sampleRows, dataFiltersKey]);
 
   /* ---- view state ---- */
   const [mode, setMode] = useState<'design' | 'preview'>(props.initialMode ?? 'design');

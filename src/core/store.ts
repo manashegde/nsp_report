@@ -39,8 +39,16 @@ export interface SaveTemplateInput {
   version?: number;
 }
 
+export interface ListTemplatesOptions {
+  /**
+   * Only templates with this status. `ReportStudio` asks for `published` for viewers; a backend
+   * store must enforce this on the server too (never send drafts to viewers).
+   */
+  status?: TemplateStatus;
+}
+
 export interface ReportTemplateStore {
-  list(): Promise<TemplateSummary[]>;
+  list(options?: ListTemplatesOptions): Promise<TemplateSummary[]>;
   get(id: string): Promise<StoredTemplate>;
   save(input: SaveTemplateInput): Promise<StoredTemplate>;
   remove(id: string): Promise<void>;
@@ -56,6 +64,8 @@ export class TemplateConflictError extends Error {
     this.name = 'TemplateConflictError';
   }
 }
+
+const withStatus = (options: ListTemplatesOptions | undefined) => (t: TemplateSummary) => !options?.status || t.status === options.status;
 
 const summaryOf = (t: StoredTemplate): TemplateSummary => {
   const { template: _template, ...summary } = t;
@@ -84,8 +94,8 @@ function applySave(existing: StoredTemplate | undefined, input: SaveTemplateInpu
 export function createMemoryTemplateStore(initial: StoredTemplate[] = []): ReportTemplateStore & { snapshot(): StoredTemplate[] } {
   const items = new Map(initial.map((t) => [t.id, structuredClone(t)]));
   return {
-    async list() {
-      return [...items.values()].map(summaryOf);
+    async list(options) {
+      return [...items.values()].map(summaryOf).filter(withStatus(options));
     },
     async get(id) {
       const t = items.get(id);
@@ -122,8 +132,8 @@ export function createLocalStorageTemplateStore(key = 'easy-report.templates'): 
     }
   };
   return {
-    async list() {
-      return read().map(summaryOf);
+    async list(options) {
+      return read().map(summaryOf).filter(withStatus(options));
     },
     async get(id) {
       const t = read().find((x) => x.id === id);
@@ -159,7 +169,8 @@ export interface RestTemplateStoreOptions {
 
 /**
  * Generic REST store: `GET base`, `GET base/{id}`, `POST base`, `PUT base/{id}`, `DELETE base/{id}`.
- * A 409 response becomes `TemplateConflictError`.
+ * A 409 response becomes `TemplateConflictError`. `list({ status })` sends `GET base?status=…`;
+ * the server must apply it (and its own role checks) itself.
  */
 export function createRestTemplateStore(opts: RestTemplateStoreOptions): ReportTemplateStore {
   const doFetch = opts.fetch ?? globalThis.fetch.bind(globalThis);
@@ -185,9 +196,10 @@ export function createRestTemplateStore(opts: RestTemplateStoreOptions): ReportT
   }
 
   return {
-    async list() {
-      const body = (await call('')) as Record<string, unknown>[];
-      return (Array.isArray(body) ? body : []).map((r) => summaryOf(from(r) as StoredTemplate));
+    async list(options) {
+      const query = options?.status ? `?status=${encodeURIComponent(options.status)}` : '';
+      const body = (await call(query)) as Record<string, unknown>[];
+      return (Array.isArray(body) ? body : []).map((r) => summaryOf(from(r) as StoredTemplate)).filter(withStatus(options));
     },
     async get(id) {
       const t = from((await call(`/${encodeURIComponent(id)}`)) as Record<string, unknown>) as StoredTemplate;

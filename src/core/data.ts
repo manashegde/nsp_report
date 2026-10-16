@@ -37,9 +37,11 @@ export function inferFields(rows: DataRow[]): FieldDef[] {
   });
 }
 
-export function getFields(ds: ReportDataSource | undefined): FieldDef[] {
+/** The data source's field schema (resolved against the template's design-time `filters`). */
+export function getFields(ds: ReportDataSource | undefined, filters?: Record<string, unknown>): FieldDef[] {
   if (!ds) return [];
-  if (ds.fields?.length) return ds.fields;
+  const declared = typeof ds.fields === 'function' ? ds.fields({ filters }) : ds.fields;
+  if (declared?.length) return declared;
   const sample = Array.isArray(ds.data) ? ds.data : ds.sampleData;
   return sample ? inferFields(sample) : [];
 }
@@ -58,7 +60,30 @@ export function prepareRows(rows: DataRow[], fields: FieldDef[]): DataRow[] {
   });
 }
 
-/** Fetch rows for a data source. `preferSample` is used by the designer preview. */
+/** Default `ReportDataSource.maxRows`. */
+export const DEFAULT_MAX_ROWS = 100_000;
+
+/** Thrown when a data source returns more rows than it allows, or a backend reports truncated data. */
+export class DataLimitError extends Error {
+  constructor(
+    public readonly dataSource: string,
+    public readonly rowCount: number | undefined,
+    public readonly maxRows: number | undefined,
+    message?: string,
+  ) {
+    super(
+      message ??
+        `'${dataSource}' returned ${rowCount?.toLocaleString() ?? 'too many'} rows; reports allow up to ${maxRows?.toLocaleString() ?? 'fewer'}. ` +
+          'Narrow the date range or sites, or aggregate on the server (e.g. per day or month).',
+    );
+    this.name = 'DataLimitError';
+  }
+}
+
+/**
+ * Fetch rows for a data source. `preferSample` is used by the designer preview.
+ * Throws `DataLimitError` when the result exceeds the source's `maxRows`.
+ */
 export async function loadData(
   ds: ReportDataSource | undefined,
   ctx: DataFetchContext,
@@ -69,7 +94,9 @@ export async function loadData(
   if (preferSample && ds.sampleData) rows = ds.sampleData;
   else if (typeof ds.data === 'function') rows = await ds.data(ctx);
   else rows = ds.data ?? ds.sampleData ?? [];
-  return prepareRows(applyDataFilters(rows, ds, ctx.filters), getFields(ds));
+  const max = ds.maxRows ?? DEFAULT_MAX_ROWS;
+  if (rows.length > max) throw new DataLimitError(ds.label ?? ds.name, rows.length, max);
+  return prepareRows(applyDataFilters(rows, ds, ctx.filters), getFields(ds, ctx.filters));
 }
 
 /** Applies design-time filters that declare a row `field` (empty selections keep every row). */

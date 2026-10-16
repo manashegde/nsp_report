@@ -93,12 +93,12 @@ export function ReportStudio(props: ReportStudioProps) {
 
   const refreshList = useCallback(async () => {
     try {
-      setList(await store.list());
+      setList(await store.list(isAdmin ? undefined : { status: 'published' }));
     } catch (e) {
       fail(e);
       setList([]);
     }
-  }, [store, fail]);
+  }, [store, fail, isAdmin]);
 
   useEffect(() => {
     void refreshList();

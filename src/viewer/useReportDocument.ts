@@ -45,7 +45,7 @@ export function useReportDocument(opts: UseReportDocumentOptions): ReportDocumen
     (async () => {
       const { config } = optsRef.current;
       const ds = dataSources?.find((d) => d.name === template.dataSource);
-      const rows = data ? prepareRows(data, getFields(ds)) : await loadData(ds, { parameters, filters: template.dataFilters, signal: ctrl.signal }, preferSample);
+      const rows = data ? prepareRows(data, getFields(ds, template.dataFilters)) : await loadData(ds, { parameters, filters: template.dataFilters, signal: ctrl.signal }, preferSample);
       if (cancelled) return;
       // Yield so the loading indicator paints before a potentially long layout.
       await new Promise((r) => setTimeout(r, 0));

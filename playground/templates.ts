@@ -1,5 +1,5 @@
 import { createGroup, createTemplate, metricExpression, uid, type ReportTemplate, type TextElement, type AnyElement } from '../src';
-import { telemetrySource } from './data';
+import { tagSummarySource, telemetrySource } from './data';
 
 const text = (p: Partial<TextElement>): TextElement => ({ id: uid(), type: 'text', x: 0, y: 0, width: 100, height: 20, ...p });
 
@@ -94,33 +94,47 @@ export function salesReport(): ReportTemplate {
   return t;
 }
 
+interface EnergyMixOptions {
+  name: string;
+  subtitle: string;
+  dataSource: string;
+  /** Site and date fields of the data source. */
+  site: string;
+  date: string;
+  /** Expression for a tag's metric column. */
+  metric: (tag: string) => string;
+  dataFilters: Record<string, unknown>;
+  filter?: string;
+}
+
+const MIX_COLUMNS = [
+  { tag: 'grid_import_kwh', label: 'Grid import' },
+  { tag: 'solar_ac_kw', label: 'Solar' },
+  { tag: 'bess_discharge_kw', label: 'BESS out' },
+  { tag: 'genset_kw', label: 'Genset' },
+  { tag: 'site_load_kw', label: 'Load' },
+];
+
 /**
  * "Site energy mix": one row per site per month, one metric column per tag —
  * built the same way the designer's "Add metric column" does.
  */
-export function siteEnergyMixReport(): ReportTemplate {
-  const m = telemetrySource.metrics!;
-  const t = createTemplate('Site energy mix');
-  t.dataSource = 'tagReadings';
+function energyMix(o: EnergyMixOptions): ReportTemplate {
+  const cols = MIX_COLUMNS;
+  const t = createTemplate(o.name);
+  t.dataSource = o.dataSource;
   t.locale = 'en-IN';
-  const cols = [
-    { tag: 'grid_import_kwh', label: 'Grid import' },
-    { tag: 'solar_ac_kw', label: 'Solar' },
-    { tag: 'bess_discharge_kw', label: 'BESS out' },
-    { tag: 'genset_kw', label: 'Genset' },
-    { tag: 'site_load_kw', label: 'Load' },
-  ];
-  t.dataFilters = { tagIds: cols.map((c) => c.tag) };
+  t.dataFilters = o.dataFilters;
   t.parameters = [
     { name: 'From', label: 'From', type: 'date', defaultValue: '2026-08-01' },
     { name: 'To', label: 'To', type: 'date', defaultValue: '2026-09-29' },
   ];
-  t.filter = '[timestamp] >= ?From and [timestamp] <= ?To';
+  t.filter = o.filter;
   const W = 718;
   t.bands.reportHeader!.height = 50;
   t.bands.reportHeader!.elements.push(
-    text({ x: 0, y: 4, width: 500, height: 28, text: 'Site energy mix', style: { fontSize: 17, bold: true, color: '#0f766e' } }),
-    text({ x: 0, y: 30, width: 500, height: 16, text: '{?From:dd MMM yyyy} – {?To:dd MMM yyyy} · kWh', style: { fontSize: 9, color: '#64748b' } }),
+    text({ x: 0, y: 4, width: 500, height: 28, text: o.name, style: { fontSize: 17, bold: true, color: '#0f766e' } }),
+    text({ x: 0, y: 30, width: 500, height: 16, text: '{?From:dd MMM yyyy} – {?To:dd MMM yyyy} · ' + o.subtitle, style: { fontSize: 9, color: '#64748b' } }),
   );
   const ph = t.bands.pageHeader!;
   ph.height = 26;
@@ -133,25 +147,53 @@ export function siteEnergyMixReport(): ReportTemplate {
   ph.elements.push(text({ x: W - 90, y: 3, width: 90, height: 20, text: 'Renewable %', style: { bold: true, fontSize: 9, padding: 4, textAlign: 'right' } }));
   t.bands.detail.height = 0;
 
-  const site = createGroup('[site]', 'Site');
+  const site = createGroup(`[${o.site}]`, 'Site');
   site.header!.height = 26;
-  site.header!.elements.push(text({ x: 0, y: 4, width: 400, height: 20, text: '{[site]}', style: { bold: true, fontSize: 11, color: '#0f766e' } }));
+  site.header!.elements.push(text({ x: 0, y: 4, width: 400, height: 20, text: `{[${o.site}]}`, style: { bold: true, fontSize: 11, color: '#0f766e' } }));
   site.footer!.height = 24;
   site.footer!.elements.push(text({ x: 0, y: 2, width: 160, height: 20, text: 'Site total', style: { bold: true, fontSize: 9, padding: 4 } }));
-  const month = createGroup("Format([timestamp], 'yyyy-MM')", 'Month');
+  const month = createGroup(`Format([${o.date}], 'yyyy-MM')`, 'Month');
   month.header = undefined;
   month.footer!.height = 20;
-  month.footer!.elements.push(text({ x: 0, y: 0, width: 160, height: 20, expression: '[timestamp]', format: 'MMM yyyy', style: { fontSize: 9, padding: 4 } }));
+  month.footer!.elements.push(text({ x: 0, y: 0, width: 160, height: 20, expression: `[${o.date}]`, format: 'MMM yyyy', style: { fontSize: 9, padding: 4 } }));
   cols.forEach((c, i) => {
-    const expr = metricExpression(m, c.tag, 'energyKwh', 'sum');
+    const expr = o.metric(c.tag);
     month.footer!.elements.push(text({ x: 160 + i * colW, y: 0, width: colW, height: 20, expression: expr, format: 'n0', exportName: c.label, style: { fontSize: 9, padding: 4, textAlign: 'right' } }));
     site.footer!.elements.push(text({ x: 160 + i * colW, y: 2, width: colW, height: 20, expression: expr, format: 'n0', style: { fontSize: 9, padding: 4, textAlign: 'right', bold: true, border: { width: 1, color: '#94a3b8', sides: { top: true } } } }));
   });
-  const sum = (tag: string) => metricExpression(m, tag, 'energyKwh', 'sum');
-  const renewable = 'Percent(' + sum('solar_ac_kw') + ' + ' + sum('bess_discharge_kw') + ', ' + sum('site_load_kw') + ')';
+  const renewable = 'Percent(' + o.metric('solar_ac_kw') + ' + ' + o.metric('bess_discharge_kw') + ', ' + o.metric('site_load_kw') + ')';
   month.footer!.elements.push(text({ x: W - 90, y: 0, width: 90, height: 20, expression: renewable, format: 'p1', exportName: 'Renewable %', style: { fontSize: 9, padding: 4, textAlign: 'right' } }));
   site.footer!.elements.push(text({ x: W - 90, y: 2, width: 90, height: 20, expression: renewable, format: 'p1', style: { fontSize: 9, padding: 4, textAlign: 'right', bold: true } }));
   t.groups.push(site, month);
   t.bands.pageFooter!.elements.push(text({ x: W - 200, y: 4, width: 200, height: 16, text: 'Page {PageNumber} of {TotalPages}', style: { fontSize: 7, color: '#94a3b8', textAlign: 'right' } }));
   return t;
+}
+
+/** On raw daily readings, aggregated in the browser — fine for small data. */
+export function siteEnergyMixReport(): ReportTemplate {
+  const m = telemetrySource.metrics!;
+  return energyMix({
+    name: 'Site energy mix',
+    subtitle: 'kWh',
+    dataSource: 'tagReadings',
+    site: 'site',
+    date: 'timestamp',
+    metric: (tag) => metricExpression(m, tag, 'energyKwh', 'sum'),
+    dataFilters: { tagIds: MIX_COLUMNS.map((c) => c.tag) },
+    filter: '[timestamp] >= ?From and [timestamp] <= ?To',
+  });
+}
+
+/** The same report on pre-aggregated rows: the backend returns one row per site × month × tag. */
+export function siteEnergyMixSummaryReport(): ReportTemplate {
+  const m = tagSummarySource.metrics!;
+  return energyMix({
+    name: 'Site energy mix (pre-aggregated)',
+    subtitle: 'kWh · aggregated per month on the server',
+    dataSource: 'tagSummary',
+    site: 'siteName',
+    date: 'period',
+    metric: (tag) => metricExpression(m, tag, 'value', 'sum'),
+    dataFilters: { tagIds: MIX_COLUMNS.map((c) => c.tag), granularity: 'month' },
+  });
 }

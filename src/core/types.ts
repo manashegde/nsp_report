@@ -251,12 +251,27 @@ export interface DataSourceFilterDef {
   type: 'multi' | 'single' | 'text';
   /** Named lookup (HostConfig.parameterLookups) providing the options. */
   lookup?: string;
+  /** Fixed options, used when there is no `lookup` (e.g. a period granularity: day / month). */
+  options?: ParameterOption[];
   /**
    * Row field the selection matches (e.g. `tagId`). When set, rows are also filtered on the client,
    * so static/sample data honours the selection; remote sources should filter server-side too.
    */
   field?: string;
   description?: string;
+}
+
+/**
+ * A numeric field metric columns can aggregate. For rows the backend has already aggregated
+ * (e.g. one row per site × day × tag from a rollup table), `parts` names the fields holding each
+ * partial result so re-aggregation stays correct: sums of sums, min of mins, max of maxes, counts
+ * as sums of counts, and averages as total sum ÷ total count — never an average of averages.
+ */
+export interface MetricValueField {
+  name: string;
+  label: string;
+  format?: string;
+  parts?: { sum?: string; count?: string; min?: string; max?: string };
 }
 
 /**
@@ -273,14 +288,18 @@ export interface DataSourceMetrics {
   /** Filter (in `filters`) whose selection limits the offered items, e.g. `tagIds`. */
   filter?: string;
   /** Numeric fields that can be aggregated, e.g. energy, average, maximum. */
-  valueFields: { name: string; label: string; format?: string }[];
+  valueFields: MetricValueField[];
 }
 
 export interface ReportDataSource {
   name: string;
   label?: string;
-  /** Schema used by the designer field list. Inferred from rows if omitted. */
-  fields?: FieldDef[];
+  /**
+   * Schema used by the designer field list. Inferred from rows if omitted. A function receives the
+   * template's design-time `filters`, for "wide" data whose columns depend on the selection
+   * (e.g. one column per selected tag).
+   */
+  fields?: FieldDef[] | ((ctx: { filters?: Record<string, unknown> }) => FieldDef[]);
   /** Static rows, or a function returning rows for the given parameter values. */
   data?: DataRow[] | ((ctx: DataFetchContext) => DataRow[] | Promise<DataRow[]>);
   /** Sample rows shown in designer preview when `data` needs a backend. */
@@ -289,6 +308,11 @@ export interface ReportDataSource {
   filters?: DataSourceFilterDef[];
   /** Enables "Add metric column" for long-format data. */
   metrics?: DataSourceMetrics;
+  /**
+   * Refuse results larger than this (default `DEFAULT_MAX_ROWS`, 100 000). Reports aggregate in the
+   * browser, so very large results mean the backend should aggregate first. `Infinity` disables.
+   */
+  maxRows?: number;
 }
 
 export type ParameterLookup = (

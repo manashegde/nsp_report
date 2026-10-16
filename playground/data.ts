@@ -1,4 +1,4 @@
-import type { DataRow, ReportDataSource } from '../src';
+import { createTagSummarySource, toDate, type DataRow, type ReportDataSource } from '../src';
 
 const REGIONS = ['North', 'South', 'East', 'West'];
 const CATEGORIES: Record<string, string[]> = {
@@ -148,4 +148,53 @@ export const telemetrySource: ReportDataSource = {
 
 export const telemetryLookups = {
   tags: () => TAGS.map((t) => ({ value: t.tagId, label: t.tagName + ' (' + t.unit + ')' })),
+  sites: () => SITES.map((s) => ({ value: s, label: s })),
 };
+
+/* ------------------------------------------------------------------ */
+/* The same telemetry pre-aggregated, as a backend rollup returns it:  */
+/* one row per site × period × tag (standard tag-summary contract).    */
+/* ------------------------------------------------------------------ */
+
+const periodStart = (iso: string, granularity: string) =>
+  granularity === 'year' ? iso.slice(0, 4) + '-01-01' : granularity === 'month' ? iso.slice(0, 7) + '-01' : iso;
+
+/** What the backend does: filter by parameters and the author's selection, then GROUP BY site, period, tag. */
+function summarize(rows: DataRow[], parameters: Record<string, unknown>, filters: Record<string, unknown> = {}): DataRow[] {
+  const from = toDate(parameters.From);
+  const to = toDate(parameters.To);
+  const tags = new Set((filters.tagIds as string[] | undefined) ?? []);
+  const sites = new Set((filters.siteIds as string[] | undefined) ?? []);
+  const granularity = String(filters.granularity ?? 'day');
+  const out = new Map<string, DataRow & { sum: number; count: number; min: number; max: number }>();
+  for (const r of rows) {
+    const day = toDate(r.timestamp)!;
+    if ((from && day < from) || (to && day > to)) continue;
+    if ((tags.size && !tags.has(String(r.tagId))) || (sites.size && !sites.has(String(r.site)))) continue;
+    const period = periodStart(String(r.timestamp), granularity);
+    const key = `${r.site}|${period}|${r.tagId}`;
+    const v = Number(r.energyKwh);
+    const acc = out.get(key);
+    if (acc) {
+      acc.sum += v;
+      acc.count += 1;
+      acc.min = Math.min(acc.min, v);
+      acc.max = Math.max(acc.max, v);
+    } else {
+      out.set(key, { siteId: r.site, siteName: r.site, period, tagId: r.tagId, tagName: r.tagName, unit: r.unit, sum: v, count: 1, min: v, max: v });
+    }
+  }
+  return [...out.values()];
+}
+
+export const tagSummarySource: ReportDataSource = createTagSummarySource({
+  label: 'Tag summary (pre-aggregated)',
+  valueLabel: 'Daily energy (kWh)',
+  format: 'n0',
+  // Simulates POST /Reports/datasets/tagSummary/rows; a real host calls its API here
+  // (e.g. with createRestDataSource) and the backend aggregates from rollup tables.
+  data: async ({ parameters, filters }) => {
+    await new Promise((r) => setTimeout(r, 200));
+    return summarize(TELEMETRY, parameters, filters);
+  },
+});

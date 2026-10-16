@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { metricExpression, METRIC_AGGREGATES, PERIOD_GROUPINGS, type MetricAggregate } from '../core/metrics';
+import { metricAggregatesFor, metricExpression, PERIOD_GROUPINGS, type MetricAggregate } from '../core/metrics';
 import { listBands, uid, type BandRef } from '../core/template';
 import { pageDimensions } from '../core/measure';
 import type { ReportTemplate } from '../core/types';
@@ -10,8 +10,11 @@ import { useER } from '../ui/config';
 import { Row } from './controls';
 import { useDesigner } from './context';
 
-/** Options of a named lookup (HostConfig.parameterLookups), with the template's data filters as context. */
-function useLookupOptions(lookup: string | undefined, filters: Record<string, unknown> | undefined) {
+/**
+ * Options of a named lookup (HostConfig.parameterLookups), with the template's data filters as context.
+ * `fixed` options are used when there is no lookup.
+ */
+function useLookupOptions(lookup: string | undefined, filters: Record<string, unknown> | undefined, fixed?: ParameterOption[]) {
   const { parameterLookups } = useER();
   const fn = lookup ? parameterLookups?.[lookup] : undefined;
   const [state, setState] = useState<{ options: ParameterOption[]; loading: boolean; error?: string }>({ options: [], loading: !!fn });
@@ -31,7 +34,7 @@ function useLookupOptions(lookup: string | undefined, filters: Record<string, un
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fn, key]);
-  return state;
+  return !fn && fixed ? { options: fixed, loading: false } : state;
 }
 
 const asList = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v === undefined || v === null || v === '' ? [] : [String(v)]);
@@ -39,7 +42,7 @@ const asList = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v =
 /** Searchable checklist for multi-select design-time filters (tag lists can be long). */
 function MultiFilter({ def, value, onChange, filters }: { def: DataSourceFilterDef; value: unknown; onChange: (v: string[]) => void; filters?: Record<string, unknown> }) {
   const { components, labels } = useER();
-  const { options, loading, error } = useLookupOptions(def.lookup, filters);
+  const { options, loading, error } = useLookupOptions(def.lookup, filters, def.options);
   const [q, setQ] = useState('');
   const selected = asList(value);
   const shown = options.filter((o) => !q || o.label.toLowerCase().includes(q.toLowerCase()) || String(o.value).toLowerCase().includes(q.toLowerCase()));
@@ -71,7 +74,7 @@ function MultiFilter({ def, value, onChange, filters }: { def: DataSourceFilterD
 
 function SingleFilter({ def, value, onChange, filters }: { def: DataSourceFilterDef; value: unknown; onChange: (v: string | undefined) => void; filters?: Record<string, unknown> }) {
   const { components, labels } = useER();
-  const { options } = useLookupOptions(def.lookup, filters);
+  const { options } = useLookupOptions(def.lookup, filters, def.options);
   return (
     <components.Select
       value={value === undefined || value === null ? '' : String(value)}
@@ -155,7 +158,7 @@ export function MetricColumnDialog({ ds, onClose }: { ds: ReportDataSource & { m
   const targets = bandTargets(listBands(t));
   const [item, setItem] = useState('');
   const [valueField, setValueField] = useState(m.valueFields[0]?.name ?? '');
-  const [aggregate, setAggregate] = useState<MetricAggregate>('sum');
+  const [aggregateChoice, setAggregate] = useState<MetricAggregate>('sum');
   const [label, setLabel] = useState('');
   const [target, setTarget] = useState(targets[0]?.band.id ?? '');
   const itemLabel = items.find((o) => String(o.value) === item)?.label ?? item;
@@ -167,6 +170,9 @@ export function MetricColumnDialog({ ds, onClose }: { ds: ReportDataSource & { m
   );
   const noRoom = contentWidth(t) - used < 100;
   const vf = m.valueFields.find((f) => f.name === valueField);
+  // Pre-aggregated values only support the aggregates whose parts the rows carry.
+  const aggregates = metricAggregatesFor(vf);
+  const aggregate = aggregates.some((a) => a.value === aggregateChoice) ? aggregateChoice : (aggregates[0]?.value ?? 'sum');
 
   const insert = () => {
     const expression = metricExpression(m, item, valueField, aggregate);
@@ -232,7 +238,7 @@ export function MetricColumnDialog({ ds, onClose }: { ds: ReportDataSource & { m
           <components.Select value={valueField} onChange={setValueField} options={m.valueFields.map((f) => ({ value: f.name, label: f.label }))} />
         </Row>
         <Row label={labels.metricAggregate}>
-          <components.Select value={aggregate} onChange={(v) => setAggregate(v as MetricAggregate)} options={METRIC_AGGREGATES} />
+          <components.Select value={aggregate} onChange={(v) => setAggregate(v as MetricAggregate)} options={aggregates} />
         </Row>
         <Row label={labels.metricLabel}>
           <components.Input value={label} onChange={setLabel} placeholder={itemLabel || labels.metricLabel} />

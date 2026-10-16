@@ -187,11 +187,11 @@ const store = createRestTemplateStore({
 
 ### Template stores
 
-A store is four async methods (`list`, `get`, `save`, `remove`); saves carry a `version` and stores throw `TemplateConflictError` when someone saved in between.
+A store is four async methods (`list`, `get`, `save`, `remove`); saves carry a `version` and stores throw `TemplateConflictError` when someone saved in between. For viewers, `ReportStudio` calls `list({ status: 'published' })`.
 
 | Store | Use |
 | --- | --- |
-| `createRestTemplateStore({ baseUrl, headers, fromServer?, toServer? })` | Your backend (`GET/POST base`, `GET/PUT/DELETE base/{id}`, 409 = conflict). Map other shapes with `fromServer` / `toServer`. |
+| `createRestTemplateStore({ baseUrl, headers, fromServer?, toServer? })` | Your backend (`GET/POST base`, `GET/PUT/DELETE base/{id}`, 409 = conflict, `GET base?status=published` for viewers). Map other shapes with `fromServer` / `toServer`. |
 | `createLocalStorageTemplateStore(key)` | Demos / POCs (per browser). |
 | `createMemoryTemplateStore(initial)` | Tests, or a host that persists elsewhere. |
 | custom | Implement `ReportTemplateStore`. |
@@ -218,6 +218,86 @@ const tagReadings: ReportDataSource = {
 - **Data selection** (report properties): the author ticks this application's tags (options come from the `tags` lookup). Data functions receive them as `filters`; static/sample data is filtered on `field`.
 - **Add metric column** (field list): pick a tag, a value and an aggregate (sum / average / max / min / count) and a caption; the designer adds a header caption and a cell such as `SumIf([energyKwh], [tagId] = 'grid_import')` to the chosen group/report band. Typical layout: group by site and by month (*Group by period* presets) with one metric column per tag.
 - Expressions gained `MinIf` / `MaxIf`; `metricExpression(...)` builds the same expressions in code for starter templates.
+
+## Production data: aggregate on the server
+
+The report engine runs in the browser and aggregates whatever rows it receives. That's fine for a few thousand rows, but telemetry adds up fast. A year of daily readings for 50 sites × 100 tags is about 1.8 M rows (~250 MB of JSON); at 15-minute resolution it's impossible. A monthly report needs only a few hundred numbers per site, so **the backend should aggregate and the report should only lay out the result**.
+
+```
+ Telemetry DB ─► rollup tables (hourly / daily) ─► report API ─► easy-report
+ (raw readings)  filled at ingestion or by a job   GROUP BY      lays out a small,
+                                                   site, period,  already-aggregated
+                                                   tag            result
+```
+
+### The standard tag-summary contract
+
+Every host that returns this shape can run the same report templates, whatever its database looks like. Typically each host writes one SQL view over its own tables.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `siteId`, `siteName` | string | Site |
+| `period` | date | Start of the period (hour / day / month / year) |
+| `tagId`, `tagName`, `unit` | string | Measured item |
+| `sum`, `count`, `min`, `max` | number | Aggregates of the readings in that period |
+
+```ts
+import { createTagSummarySource, createRestDataSource } from '@nsplus/easy-report';
+
+// Contract fields, tag/site/granularity pickers and metric columns, data from your API:
+const tagSummary = createTagSummarySource({
+  valueLabel: 'Energy (kWh)', format: 'n0',
+  data: (ctx) => api.tagSummary(ctx),   // or createRestDataSource({...}).data
+});
+```
+
+- The author picks **tags, sites and granularity** (`hour` / `day` / `month` / `year`) once per report (`template.dataFilters`). The data function receives them as `filters`, so the backend can return exactly one row per site × period × tag.
+- **Metric columns re-aggregate correctly.** A value field with `parts` (`{ sum, count, min, max }`) produces sums of sums, min of mins, max of maxes, and **averages as total sum ÷ total count, never an average of averages.** The designer only offers the aggregates the parts support.
+
+```ts
+metrics: {
+  keyField: 'tagId',
+  valueFields: [{ name: 'energy', label: 'Energy', parts: { sum: 'energy_sum', count: 'energy_count', max: 'energy_max' } }],
+}
+// avg → SumIf([energy_sum], [tagId] = 'pv') / SumIf([energy_count], [tagId] = 'pv')
+```
+
+### Wide (pivoted) rows
+
+If the backend pivots to one row per site × period with one column per tag (`{ site, period, grid_import_kwh, solar_kwh, … }`), templates bind straight to `[grid_import_kwh]`. The columns depend on the author's selection, so `fields` can be a function of the design-time filters:
+
+```ts
+fields: ({ filters }) => [
+  { name: 'site', type: 'string' }, { name: 'period', type: 'date' },
+  ...(filters?.tagIds as string[] ?? []).map((t) => ({ name: t, label: tagLabel(t), type: 'number' })),
+],
+```
+
+### `createRestDataSource`: named queries, never SQL from the browser
+
+```ts
+const energy = createRestDataSource({
+  name: 'energy', label: 'Energy summary', fields: TAG_SUMMARY_FIELDS,
+  url: '/api/v1/Reports/datasets/energy/rows',
+  headers: () => ({ Authorization: `Bearer ${token}` }),
+});
+```
+
+- Sends `POST url` with `{ parameters, filters }`. Dates are sent as local ISO (`2026-07-01T00:00:00+05:30`) so a picked day doesn't shift through UTC. Override with `toServer`.
+- Accepts `rows[]` or `{ rows, truncated, rowLimit }` (override with `fromServer`). **Truncated results are refused** with `DataLimitError`, because totals over a partial result would be silently wrong. Pass `onTruncated` to accept them anyway.
+- Error bodies `{ error }`, `{ message }` and ASP.NET ProblemDetails (`title` / `detail`) become the error message shown in the viewer.
+
+### Row limit
+
+Every data source refuses results above `maxRows` (default `DEFAULT_MAX_ROWS` = 100 000) with a `DataLimitError` that tells the viewer to narrow the range or aggregate. Set `maxRows: Infinity` to disable it.
+
+### Security: what the backend must enforce
+
+Everything the browser sends can be edited by the user, so these checks belong on the server:
+
+- **Data scoping.** `filters` (tags, sites) and `parameters` come from the client. The rows endpoint must check that the requested sites and tags belong to the signed-in customer, and treat an empty selection as "everything *this user* may see".
+- **Drafts.** The templates endpoint must return only published templates to viewers (`?status=published` is a hint, not a guarantee) and allow saving and deleting only to authors.
+- **Queries.** Datasets are named queries or views owned by the backend. Never accept SQL or expressions from the browser to run against the database.
 
 ## Viewer API
 

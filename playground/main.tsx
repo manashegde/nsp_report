@@ -9,8 +9,8 @@ import {
   type ElementTypeDef,
   type StarterTemplate,
 } from '../src';
-import { dataSources, parameterLookups, telemetryLookups, telemetrySource } from './data';
-import { salesReport, siteEnergyMixReport } from './templates';
+import { dataSources, parameterLookups, tagSummarySource, telemetryLookups, telemetrySource } from './data';
+import { salesReport, siteEnergyMixReport, siteEnergyMixSummaryReport } from './templates';
 
 /** Example of a host-defined element: a progress bar bound to an expression. */
 const progressBar: ElementTypeDef = {
@@ -56,10 +56,12 @@ async function seedIfEmpty() {
   if ((await store.list()).length) return;
   await store.save({ name: 'Sales by Category', category: 'Sales', status: 'published', description: 'Orders by category with totals', template: salesReport() });
   await store.save({ name: 'Site energy mix', category: 'Energy', status: 'published', description: 'Monthly kWh per source and renewable share', template: siteEnergyMixReport() });
+  await store.save({ name: 'Site energy mix (pre-aggregated)', category: 'Energy', status: 'published', description: 'Same report on server-aggregated rows (tag-summary contract)', template: siteEnergyMixSummaryReport() });
 }
 
 const starters: StarterTemplate[] = [
   { id: 'energy-mix', label: 'Site energy mix', description: 'Sites × months with metric columns per tag', create: siteEnergyMixReport },
+  { id: 'energy-mix-summary', label: 'Site energy mix (pre-aggregated)', description: 'Same, on server-aggregated tag-summary rows', create: siteEnergyMixSummaryReport },
   { id: 'sales', label: 'Sales by category', description: 'Grouped orders with summaries', create: salesReport },
 ];
 
@@ -76,7 +78,7 @@ function App() {
   const config = useMemo<EasyReportConfig>(
     () => ({
       theme: dark ? 'dark' : 'light',
-      dataSources: [...dataSources, telemetrySource],
+      dataSources: [...dataSources, telemetrySource, tagSummarySource],
       parameterLookups: { ...parameterLookups, ...telemetryLookups },
       elementTypes: [progressBar],
       locale: 'en-US',

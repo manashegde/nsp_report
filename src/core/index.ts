@@ -38,7 +38,8 @@ export {
   type ElementLayoutApi,
   type ElementLayoutResult,
 } from './layout';
-export { inferFields, getFields, prepareRows, loadData, flattenFields, applyDataFilters } from './data';
+export { inferFields, getFields, prepareRows, loadData, flattenFields, applyDataFilters, DataLimitError, DEFAULT_MAX_ROWS } from './data';
+export { createRestDataSource, toLocalIsoString, type RestDataSourceOptions, type RestRowsResponse } from './remote';
 export {
   createMemoryTemplateStore,
   createLocalStorageTemplateStore,
@@ -50,8 +51,19 @@ export {
   type SaveTemplateInput,
   type TemplateStatus,
   type RestTemplateStoreOptions,
+  type ListTemplatesOptions,
 } from './store';
-export { metricExpression, METRIC_AGGREGATES, PERIOD_GROUPINGS, type MetricAggregate } from './metrics';
+export {
+  metricExpression,
+  metricAggregatesFor,
+  METRIC_AGGREGATES,
+  PERIOD_GROUPINGS,
+  TAG_SUMMARY_FIELDS,
+  TAG_SUMMARY_GRANULARITIES,
+  createTagSummarySource,
+  type MetricAggregate,
+  type TagSummarySourceOptions,
+} from './metrics';
 export {
   createTemplate,
   createBand,
