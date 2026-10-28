@@ -136,7 +136,7 @@ function formatDateCustom(d: Date, pattern: string, o: FormatOptions): string {
   return pattern.replace(re, (tok) => {
     switch (tok) {
       case 'yyyy':
-        return String(d.getFullYear());
+        return String(d.getFullYear()).padStart(4, '0');
       case 'yy':
         return pad(d.getFullYear() % 100);
       case 'MMMM':
@@ -210,6 +210,24 @@ export function defaultFormat(v: unknown, o: FormatOptions = {}): string {
   if (Array.isArray(v)) return v.map((x) => defaultFormat(x, o)).join(', ');
   if (typeof v === 'object') return JSON.stringify(v);
   return String(v);
+}
+
+/**
+ * Locale-independent number for data export: no grouping or currency symbol, `.` as the
+ * decimal separator, decimals taken from the format. Percent and other display-only formats
+ * (`p`, `e`, `d5`, ...) return null so the caller keeps the displayed text.
+ */
+export function plainNumber(v: unknown, format?: string): string | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  const spec = format?.trim() ?? '';
+  if (!spec) return Number.isInteger(v) ? String(v) : String(Number(v.toFixed(4)));
+  const std = /^([nNfFcC])(\d{0,2})$/.exec(spec);
+  if (std) return v.toFixed(std[2] === '' ? 2 : Number(std[2]));
+  if (/[#0]/.test(spec) && !/[%‰eE]/.test(spec)) {
+    const decimals = /\.([0#]+)/.exec(spec)?.[1].length ?? 0;
+    return v.toFixed(decimals);
+  }
+  return null;
 }
 
 export function formatValue(v: unknown, format: string | undefined, o: FormatOptions = {}): string {

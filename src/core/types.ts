@@ -400,10 +400,15 @@ export interface RenderedPage {
   items: RenderedItem[];
 }
 
-/** Tabular projection of the detail band, used by CSV export. */
+/**
+ * Tabular projection used by CSV export: one row per detail row, or per innermost group
+ * footer/header when the detail band shows no values (summary reports).
+ */
 export interface TabularData {
   columns: string[];
   rows: string[][];
+  /** Report header text (name, scope, KPIs), one array of cells per line. */
+  context?: string[][];
 }
 
 export interface RenderedDocument {

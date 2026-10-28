@@ -123,6 +123,8 @@ const config: EasyReportConfig = {
   icons: { pdf: <MyPdfIcon /> },
   dataSources,
   parameterLookups: { regions: async () => (await api.regions()).map((r) => ({ value: r.id, label: r.name })) },
+  // Messages per parameter: shown under the fields, Submit blocked, report not run.
+  validateParameters: (v) => (v.From > v.To ? { From: "'From' must be on or before 'To'." } : null),
   functions: { FiscalYear: ([d]) => /* … */ 2025 },                    // extra expression functions
   elementTypes: [barcodeElement],                                         // custom elements
   pdf: { fonts: [{ family: 'Noto Sans', source: '/fonts/NotoSans-Regular.ttf' }] },
@@ -330,6 +332,8 @@ const doc = renderReport(template, prepareRows(rows, fields), { parameters: { Re
 const pdf = await createPdf(doc);           // jsPDF instance → pdf.output('arraybuffer')
 const csv = documentToCsv(doc);             // report columns; { mode: 'data' } for raw rows
 ```
+
+Report-mode CSV has one row per detail row; when the detail band shows no values (a summary report), it has one row per innermost group footer (or header) that does. Numbers are written plain (`1234.5`, no grouping or currency symbol). Pass `{ context: true }` (or `config.csv.context`) to write the report header — name, scope, KPIs — above the table.
 
 Layout uses built-in Helvetica/Arial metrics, so pagination is identical in the browser, on the server and in the PDF.
 

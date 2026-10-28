@@ -91,6 +91,11 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
   const missingRequired = template.parameters.some(
     (p) => p.required && (params[p.name] === null || params[p.name] === undefined || params[p.name] === ''),
   );
+  const validateParameters = cfg.validateParameters;
+  const validate = useCallback((v: Record<string, unknown>) => validateParameters?.(v, template), [validateParameters, template]);
+  const paramErrors = Object.values(validate(params) ?? {}).filter(Boolean);
+  // Never run with values the host rejects (e.g. From after To), even if they came from defaults or props.
+  const blocked = missingRequired || paramErrors.length > 0;
   const panelMode = props.parametersPanel ?? 'auto';
   const [panelOpen, setPanelOpen] = useState(panelMode === 'open' || (panelMode === 'auto' && visibleParams.length > 0));
 
@@ -100,7 +105,7 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
     data: props.data,
     dataSources,
     parameters: params,
-    enabled: !missingRequired,
+    enabled: !blocked,
     preferSample: props.preferSampleData,
     config: cfg,
   });
@@ -252,7 +257,7 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
     },
     { id: 'zoomIn', icon: icon('zoomIn'), title: labels.zoomIn, onClick: () => stepZoom(1) },
     { id: 'search', icon: icon('search'), title: labels.search, active: searchOpen, onClick: () => setSearchOpen((s) => !s), separator: true },
-    { id: 'refresh', icon: icon('refresh'), title: labels.refresh, onClick: refresh, disabled: missingRequired },
+    { id: 'refresh', icon: icon('refresh'), title: labels.refresh, onClick: refresh, disabled: blocked },
     { id: 'print', icon: icon('print'), title: labels.print, disabled: noDoc, onClick: print, separator: true, spacer: true },
     { id: 'exportPdf', icon: icon('pdf'), title: labels.exportPdf, disabled: noDoc || busy, onClick: () => void exportPdf() },
     { id: 'exportCsv', icon: icon('csv'), title: labels.exportCsv, disabled: noDoc, onClick: () => exportCsv() },
@@ -287,6 +292,7 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
               <ParametersPanel
                 parameters={template.parameters}
                 values={params}
+                validate={validate}
                 onSubmit={(v) => {
                   setParams(v);
                   props.onParametersChange?.(v);
@@ -302,6 +308,11 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
               </div>
             )}
             {!error && missingRequired && <div className="er-message">{labels.enterParameters}</div>}
+            {!error && !missingRequired && paramErrors.length > 0 && (
+              <div className="er-message er-message--error" role="alert">
+                {paramErrors.join(' ')}
+              </div>
+            )}
             {loading && (
               <div className="er-loading" role="status">
                 <span className="er-spinner" /> {labels.loading}
@@ -316,7 +327,7 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
               <div className="er-message">{props.emptyState}</div>
             ) : (
               doc &&
-              !missingRequired && (
+              !blocked && (
                 <PagesView
                   doc={doc}
                   zoom={zoom}

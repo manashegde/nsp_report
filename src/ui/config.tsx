@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type CSSProperties, type ReactNode 
 import type { FunctionDef, HostFunction } from '../core/evaluator';
 import type { ElementLayout } from '../core/layout';
 import type { TextMeasurer } from '../core/measure';
-import type { AnyElement, ParameterLookup, ReportDataSource } from '../core/types';
+import type { AnyElement, ParameterLookup, ReportDataSource, ReportTemplate } from '../core/types';
 import type { CsvExportOptions } from '../export/csv';
 import type { PdfExportOptions } from '../export/pdf';
 import { SvgIcon, type IconName, type IconOverrides } from './icons';
@@ -182,6 +182,11 @@ export interface EasyReportConfig {
   dataSources?: ReportDataSource[];
   /** Named lookups for parameter value lists. */
   parameterLookups?: Record<string, ParameterLookup>;
+  /**
+   * Host-wide parameter rules (e.g. From on or before To). Return messages keyed by parameter
+   * name; the panel shows them under the fields and blocks Submit, and the viewer does not run.
+   */
+  validateParameters?: (values: Record<string, unknown>, template: ReportTemplate) => Record<string, string> | null | undefined;
   /** Extra expression functions. */
   functions?: Record<string, HostFunction | FunctionDef>;
   elementTypes?: ElementTypeDef[];

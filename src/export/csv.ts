@@ -6,10 +6,13 @@ import { downloadBlob, sanitizeFileName } from './pdf';
 
 export interface CsvExportOptions {
   /**
-   * `report` (default): the detail band's displayed values (formatted, with group columns).
+   * `report` (default): the report's rows as displayed, with group columns; numbers are written
+   * plain (no grouping or currency symbol). Summary reports get one row per group footer.
    * `data`: the underlying filtered/sorted rows, one column per field.
    */
   mode?: 'report' | 'data';
+  /** Write the report header (name, scope, KPIs) above the table, then a blank line (default false). */
+  context?: boolean;
   delimiter?: string;
   /** Prepend a UTF-8 BOM so Excel detects the encoding (default true). */
   bom?: boolean;
@@ -28,7 +31,9 @@ function cell(v: string, delimiter: string, escapeFormulas: boolean): string {
 export function tableToCsv(table: TabularData, opts: CsvExportOptions = {}): string {
   const d = opts.delimiter ?? ',';
   const esc = opts.escapeFormulas !== false;
-  const lines = [table.columns, ...table.rows].map((r) => r.map((c) => cell(c ?? '', d, esc)).join(d));
+  const write = (rows: string[][]) => rows.map((r) => r.map((c) => cell(c ?? '', d, esc)).join(d));
+  const lines = write([table.columns, ...table.rows]);
+  if (opts.context && table.context?.length) lines.unshift(...write(table.context), '');
   return lines.join('\r\n');
 }
 
@@ -46,7 +51,7 @@ export function rowsToTable(rows: DataRow[]): TabularData {
 }
 
 export function documentToCsv(doc: RenderedDocument, opts: CsvExportOptions = {}): string {
-  const table = opts.mode === 'data' ? rowsToTable(doc.rows) : doc.table;
+  const table = opts.mode === 'data' ? { ...rowsToTable(doc.rows), context: doc.table.context } : doc.table;
   return tableToCsv(table, opts);
 }
 

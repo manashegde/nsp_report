@@ -11,7 +11,7 @@ import {
   type ScopeName,
 } from './evaluator';
 import { ExpressionError, isPageDependent, parseExpression, referencedFields } from './expression';
-import { formatValue, toDate } from './format';
+import { formatValue, plainNumber, toDate } from './format';
 import { defaultMeasurer, lineHeightPx, pageDimensions, wrapText, type TextMeasurer } from './measure';
 import type {
   AnyElement,
@@ -56,6 +56,8 @@ export interface ElementLayoutResult {
   height: number;
   /** Display value used for CSV export. */
   value?: string;
+  /** Data value for CSV export when it differs from the display (plain numbers); defaults to `value`. */
+  exportValue?: string;
 }
 
 export type ElementLayout = (el: AnyElement, api: ElementLayoutApi) => ElementLayoutResult | null;
@@ -89,14 +91,17 @@ export function mergeStyle(base: ResolvedTextStyle, ...over: (ElementStyle | und
 const textLayout: ElementLayout = (el, api) => {
   const t = el as TextElement;
   let text: string;
+  let exportValue: string | undefined;
   if (t.expression && t.expression.trim()) {
     const v = api.evaluate(t.expression);
     text = v === ERR ? ERR : api.format(v, t.format);
+    exportValue = plainNumber(v, t.format) ?? undefined;
   } else {
     text = api.interpolate(t.text ?? '');
   }
   const res = api.layoutText(el, text, { canGrow: t.canGrow, wordWrap: t.wordWrap });
   res.value = text;
+  res.exportValue = exportValue;
   return res;
 };
 
@@ -456,7 +461,8 @@ class LayoutEngine {
         continue;
       }
       byElement.set(el.id, res.items);
-      if (res.value !== undefined) values.set(el.id, res.value);
+      const value = res.exportValue ?? res.value;
+      if (value !== undefined) values.set(el.id, value);
       const growth = Math.max(0, res.height - el.height);
       placed.push({ el, growth });
       bottom = Math.max(bottom, shifted.y + res.height);
@@ -564,7 +570,7 @@ class LayoutEngine {
     if (!res) return;
     this.place(res, ctx, band);
     this.pageRows[this.pageRows.length - 1].push(row);
-    this.tableRows.push(this.tableRow(res.values));
+    this.addTableRow(band, res.values, ctx.scope.groups);
   }
 
   private renderLevel(rows: DataRow[], level: number) {
@@ -594,6 +600,7 @@ class LayoutEngine {
             if (!this.fits(res.height + (probe?.height ?? 0)) && this.y > this.pageContentStart) this.newPage();
           }
           this.place(res, ctx, def.header);
+          this.addTableRow(def.header, res.values, ctx.scope.groups);
         }
       }
 
@@ -603,7 +610,10 @@ class LayoutEngine {
 
       if (def.footer) {
         const res = this.layoutBand(def.footer, ctx, 'page-dependent');
-        if (res) this.place(res, ctx, def.footer);
+        if (res) {
+          this.place(res, ctx, def.footer);
+          this.addTableRow(def.footer, res.values, ctx.scope.groups);
+        }
       }
     }
   }
@@ -620,20 +630,53 @@ class LayoutEngine {
   /* ---------------- CSV projection ---------------- */
 
   private columns: { el: AnyElement; header: string }[] = [];
+  /** Group key columns written before the element columns (indices into `template.groups`). */
+  private groupColumns: number[] = [];
+  /**
+   * Band whose instances become CSV rows: the detail band, or, for summary reports whose
+   * detail band is empty, the innermost group footer/header that shows values.
+   */
+  private rowBand: Band | null = null;
+  /** Column elements rendered in at least one row (always-hidden ones are dropped). */
+  private renderedColumns = new Set<string>();
 
   private buildColumns() {
-    const detail = this.template.bands.detail;
+    const t = this.template;
+    const exportable = (band: Band | undefined) =>
+      (band?.elements ?? []).filter((e) => {
+        const te = e as TextElement;
+        if (e.type === 'checkbox') return true;
+        return e.type === 'text' && (!!te.expression?.trim() || (te.text ?? '').includes('{'));
+      });
+
+    let elements = exportable(t.bands.detail);
+    let depth = t.groups.length;
+    this.rowBand = t.bands.detail;
+    if (!elements.length) {
+      for (let i = t.groups.length - 1; i >= 0 && !elements.length; i--) {
+        for (const band of [t.groups[i].footer, t.groups[i].header]) {
+          const found = exportable(band);
+          if (found.length) {
+            elements = found;
+            depth = i + 1;
+            this.rowBand = band!;
+            break;
+          }
+        }
+      }
+    }
+
     const labels: AnyElement[] = [
-      ...(this.template.bands.pageHeader?.elements ?? []),
-      ...this.template.groups.flatMap((g) => g.header?.elements ?? []),
+      ...(t.bands.pageHeader?.elements ?? []),
+      ...t.groups.flatMap((g) => g.header?.elements ?? []),
     ].filter((e) => e.type === 'text' && !(e as TextElement).expression);
 
-    this.columns = detail.elements
-      .filter((e) => {
-        const t = e as TextElement;
-        if (e.type === 'checkbox') return true;
-        return e.type === 'text' && (!!t.expression?.trim() || (t.text ?? '').includes('{'));
-      })
+    // A group whose key is already shown as a column (e.g. `[tagName]`) needs no key column.
+    const norm = (s: string | undefined) => (s ?? '').replace(/\s+/g, '').toLowerCase();
+    const shown = new Set(elements.map((e) => norm((e as TextElement).expression)).filter(Boolean));
+    this.groupColumns = t.groups.slice(0, depth).flatMap((g, i) => (shown.has(norm(g.expression)) ? [] : [i]));
+
+    this.columns = elements
       .sort((a, b) => a.x - b.x || a.y - b.y)
       .map((el, i) => {
         const t = el as TextElement;
@@ -653,9 +696,31 @@ class LayoutEngine {
       });
   }
 
-  private tableRow(values: Map<string, string>): string[] {
-    const groupCols = this.activeGroups.map((g) => formatValue(g.group.key, undefined, this.env.format));
-    return [...groupCols, ...this.columns.map((c) => values.get(c.el.id) ?? '')];
+  /** Record a CSV row when `band` is the row band; `groups` is the open group stack, outermost first. */
+  private addTableRow(band: Band, values: Map<string, string>, groups: ActiveGroup[]) {
+    if (band !== this.rowBand) return;
+    const key = (v: unknown) => plainNumber(v) ?? formatValue(v, undefined, this.env.format);
+    for (const c of this.columns) if (values.has(c.el.id)) this.renderedColumns.add(c.el.id);
+    this.tableRows.push([
+      ...this.groupColumns.map((i) => key(groups[i]?.key)),
+      ...this.columns.map((c) => values.get(c.el.id) ?? ''),
+    ]);
+  }
+
+  /** Report header text as lines (elements sharing a row become cells), for self-describing exports. */
+  private contextLines(res: BandResult | null): string[][] {
+    const els = (this.template.bands.reportHeader?.elements ?? [])
+      .filter((e) => res?.values.get(e.id)?.trim())
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    const lines: { top: number; bottom: number; els: AnyElement[] }[] = [];
+    for (const el of els) {
+      const mid = el.y + el.height / 2;
+      const line = lines.find((l) => mid >= l.top && mid < l.bottom);
+      if (line) line.els.push(el);
+      else lines.push({ top: el.y, bottom: el.y + el.height, els: [el] });
+    }
+    const out = lines.map((l) => l.els.sort((a, b) => a.x - b.x).map((e) => res!.values.get(e.id)!.trim()));
+    return out.length ? out : [[this.template.name]];
   }
 
   /* ---------------- entry point ---------------- */
@@ -697,9 +762,11 @@ class LayoutEngine {
 
     // Report header, then page header on the first page.
     const rh = t.bands.reportHeader;
+    let context: string[][] = [[t.name]];
     if (rh) {
       const ctx = this.ctxFor(rows[0] ?? null, 'report', false);
       const res = this.layoutBand(rh, ctx, 'page-dependent');
+      context = this.contextLines(res);
       if (res) this.commit(res, ctx);
       if (rh.pageBreakAfter) this.pendingBreak = true;
     }
@@ -742,16 +809,19 @@ class LayoutEngine {
       if (res) d.page.items.push(...translate(res.items, d.offsetX, d.offsetY));
     }
 
-    const groupHeaders = t.groups.map((g, i) => g.name || referencedFields(g.expression)[0] || `Group ${i + 1}`);
-    // Drop detail columns that never produced a value (e.g. always-hidden elements).
-    const keep = [...groupHeaders.map(() => true), ...this.columns.map((_, i) => this.tableRows.some((r) => r[groupHeaders.length + i] !== ''))];
+    const groupHeaders = this.groupColumns.map((i) => {
+      const g = t.groups[i];
+      return g.name || referencedFields(g.expression)[0] || `Group ${i + 1}`;
+    });
+    // Drop columns that were never rendered (e.g. always-hidden elements).
+    const keep = [...groupHeaders.map(() => true), ...this.columns.map((c) => this.renderedColumns.has(c.el.id))];
     const pick = <T,>(arr: T[]) => arr.filter((_, i) => keep[i]);
     return {
       name: t.name,
       pages: this.pages,
       pageWidth: this.pageW,
       pageHeight: this.pageH,
-      table: { columns: pick([...groupHeaders, ...this.columns.map((c) => c.header)]), rows: this.tableRows.map(pick) },
+      table: { columns: pick([...groupHeaders, ...this.columns.map((c) => c.header)]), rows: this.tableRows.map(pick), context },
       rows,
       warnings: [...this.warnings],
     };

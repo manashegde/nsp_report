@@ -63,7 +63,7 @@ export function useReportDocument(opts: UseReportDocumentOptions): ReportDocumen
       if (!cancelled) setState({ document: doc, loading: false, error: null });
     })().catch((e: unknown) => {
       if (cancelled || (e instanceof DOMException && e.name === 'AbortError')) return;
-      setState({ document: null, loading: false, error: e instanceof Error ? e : new Error(String(e)) });
+      setState({ document: null, loading: false, error: toError(e) });
     });
     return () => {
       cancelled = true;
@@ -73,6 +73,23 @@ export function useReportDocument(opts: UseReportDocumentOptions): ReportDocumen
 
   const refresh = useCallback(() => setNonce((n) => n + 1), []);
   return { ...state, refresh };
+}
+
+/**
+ * Data sources often reject with plain objects (RTK Query, fetch wrappers): read the usual
+ * message fields instead of showing "[object Object]".
+ */
+export function toError(e: unknown): Error {
+  if (e instanceof Error) return e;
+  if (typeof e === 'string' && e) return new Error(e);
+  if (e && typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    const data = (o.data && typeof o.data === 'object' ? o.data : {}) as Record<string, unknown>;
+    for (const v of [o.message, o.errorMessage, o.error, o.detail, o.title, data.message, data.errorMessage, data.error, data.detail, data.title]) {
+      if (typeof v === 'string' && v.trim()) return new Error(v);
+    }
+  }
+  return new Error('The report data could not be loaded.');
 }
 
 function stableKey(v: Record<string, unknown>): string {

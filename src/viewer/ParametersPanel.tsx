@@ -92,10 +92,13 @@ export function ParametersPanel({
   parameters,
   values,
   onSubmit,
+  validate,
 }: {
   parameters: ParameterDef[];
   values: Record<string, unknown>;
   onSubmit: (values: Record<string, unknown>) => void;
+  /** Messages keyed by parameter name; any message blocks Submit. */
+  validate?: (values: Record<string, unknown>) => Record<string, string> | null | undefined;
 }) {
   const { components, labels } = useER();
   const { Button } = components;
@@ -103,13 +106,15 @@ export function ParametersPanel({
   useEffect(() => setDraft(values), [values]);
   const visible = parameters.filter((p) => p.visible !== false);
   const missing = visible.filter((p) => p.required && (draft[p.name] === null || draft[p.name] === undefined || draft[p.name] === ''));
+  const errors = validate?.(draft) ?? {};
+  const invalid = Object.values(errors).some(Boolean);
 
   return (
     <form
       className="er-params"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!missing.length) onSubmit(draft);
+        if (!missing.length && !invalid) onSubmit(draft);
       }}
     >
       <div className="er-params__title">{labels.parameters}</div>
@@ -123,6 +128,11 @@ export function ParametersPanel({
               </label>
             ) : null}
             <ParameterInput p={p} value={draft[p.name]} all={draft} onChange={(v) => setDraft((d) => ({ ...d, [p.name]: v }))} />
+            {errors[p.name] && (
+              <div className="er-field__error" role="alert">
+                {errors[p.name]}
+              </div>
+            )}
             {p.description && <div className="er-field__hint">{p.description}</div>}
           </div>
         ))}
@@ -131,7 +141,7 @@ export function ParametersPanel({
         <Button variant="ghost" onClick={() => setDraft(values)}>
           {labels.reset}
         </Button>
-        <Button variant="primary" type="submit" disabled={missing.length > 0}>
+        <Button variant="primary" type="submit" disabled={missing.length > 0 || invalid}>
           {labels.submit}
         </Button>
       </div>

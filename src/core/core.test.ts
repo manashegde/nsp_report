@@ -154,6 +154,61 @@ describe('layout', () => {
     expect(csv).toContain('B,300.00');
     expect(documentToCsv(doc, { mode: 'data' }).split('\r\n')[0]).toBe('Region,Product,Amount,Qty,Date');
   });
+
+  it('exports summary reports (empty detail band) from the innermost group footer', () => {
+    const text = (p: Partial<TextElement>): TextElement => ({ id: uid(), type: 'text', x: 0, y: 0, width: 100, height: 20, ...p });
+    const t = createTemplate('Energy');
+    t.parameters.push({ name: 'Site', type: 'number' });
+    t.bands.reportHeader!.elements.push(
+      text({ x: 0, y: 9, width: 400, height: 26, text: 'Energy' }),
+      text({ x: 400, y: 8, width: 200, height: 26, expression: 'Sum([kwh])', format: 'n1' }),
+      text({ x: 0, y: 34, width: 400, height: 18, text: "{Iif(IsNull(?Site, 0) = 0, 'All sites', 'One site')}" }),
+      text({ x: 400, y: 34, width: 200, height: 18, text: 'total kWh' }),
+    );
+    t.bands.pageHeader!.elements.push(
+      text({ x: 0, width: 250, text: 'Device / tag' }),
+      text({ x: 250, width: 110, text: 'Energy (kWh)' }),
+      text({ x: 360, width: 90, text: 'Peak' }),
+    );
+    t.bands.detail.height = 0;
+    const site = createGroup('[site]', 'Site');
+    site.header!.elements.push(text({ text: '{[site]}' }));
+    const tag = createGroup('[tag]', 'Tag');
+    tag.header = undefined;
+    tag.footer!.elements.push(
+      text({ x: 16, width: 234, expression: '[tag]' }),
+      text({ x: 250, width: 110, expression: "Sum([kwh], 'group')", format: 'n1' }),
+      text({ x: 360, width: 90, expression: "Iif([tag] = 'b', Max([kw], 'group'), null)", format: 'n2' }),
+    );
+    t.groups.push(site, tag);
+    const data = [
+      { site: 'S1', tag: 'a', kwh: 1000, kw: 5 },
+      { site: 'S1', tag: 'a', kwh: 250.5, kw: 7 },
+      { site: 'S1', tag: 'b', kwh: 10, kw: 2 },
+      { site: 'S1', tag: 'b', kwh: 20, kw: 3 },
+    ];
+    const doc = renderReport(t, data, { locale: 'en-IN' });
+    // One row per tag (not per raw row); the Tag key column is dropped since `[tag]` is a column;
+    // the Peak column stays although empty for tag a; numbers are plain.
+    expect(documentToCsv(doc).split('\r\n')).toEqual([
+      'Site,Device / tag,Energy (kWh),Peak',
+      'S1,a,1250.5,',
+      'S1,b,30.0,3.00',
+    ]);
+    expect(documentToCsv(doc, { context: true }).split('\r\n').slice(0, 4)).toEqual([
+      'Energy,1280.5',
+      'All sites,total kWh',
+      '',
+      'Site,Device / tag,Energy (kWh),Peak',
+    ]);
+  });
+});
+
+describe('date format', () => {
+  it('pads years below 1000 so yyyy-MM-dd stays a valid date-input value', () => {
+    const d = new Date('0020-10-07T00:00:00');
+    expect(formatValue(d, 'yyyy-MM-dd')).toBe('0020-10-07');
+  });
 });
 
 describe('pdf text encoding', async () => {

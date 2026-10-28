@@ -48,6 +48,27 @@ describe('React components', () => {
     root.unmount();
   });
 
+  it('ReportViewer does not run with parameters the host rejects', async () => {
+    let fetches = 0;
+    const counted: ReportDataSource[] = [{ ...ds[0], data: async () => (fetches++, ds[0].data as never) }];
+    const t = { ...template, parameters: [{ name: 'From', type: 'date' as const, defaultValue: '2026-10-07' }, { name: 'To', type: 'date' as const, defaultValue: '2026-10-01' }] };
+    const validateParameters = (v: Record<string, unknown>) =>
+      (v.From as Date) > (v.To as Date) ? { From: "'From' must be on or before 'To'." } : null;
+    const root = await mount(<ReportViewer template={t} dataSources={counted} config={{ validateParameters }} />);
+    expect(fetches).toBe(0);
+    expect(container.querySelector('.er-page-frame')).toBeNull();
+    expect(container.querySelector('.er-field__error')?.textContent).toBe("'From' must be on or before 'To'.");
+    expect(container.querySelector<HTMLButtonElement>('.er-params button[type="submit"]')?.disabled).toBe(true);
+    root.unmount();
+  });
+
+  it('ReportViewer shows the message of a plain-object data error', async () => {
+    const failing: ReportDataSource[] = [{ ...ds[0], data: () => Promise.reject({ errorCode: '400', errorMessage: "'from' must be before 'to'." }) }];
+    const root = await mount(<ReportViewer template={template} dataSources={failing} />);
+    expect(container.querySelector('.er-message--error')?.textContent).toBe("'from' must be before 'to'.");
+    root.unmount();
+  });
+
   it('ReportViewer honours toolbar config and labels', async () => {
     const root = await mount(
       <ReportViewer template={template} dataSources={ds} toolbar={['exportPdf']} config={{ labels: { exportPdf: 'PDF herunterladen' } }} />,

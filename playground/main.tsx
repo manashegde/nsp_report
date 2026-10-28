@@ -82,6 +82,9 @@ function App() {
       parameterLookups: { ...parameterLookups, ...telemetryLookups },
       elementTypes: [progressBar],
       locale: 'en-US',
+      // Host-wide rule shown under the fields; the report does not run while it fails.
+      validateParameters: (v) =>
+        v.From instanceof Date && v.To instanceof Date && v.From > v.To ? { From: "'From' must be on or before 'To'." } : null,
     }),
     [dark],
   );
