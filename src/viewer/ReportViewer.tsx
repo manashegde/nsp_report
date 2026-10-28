@@ -292,6 +292,7 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
               <ParametersPanel
                 parameters={template.parameters}
                 values={params}
+                defaults={initialParams}
                 validate={validate}
                 onSubmit={(v) => {
                   setParams(v);

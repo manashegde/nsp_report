@@ -62,6 +62,32 @@ describe('React components', () => {
     root.unmount();
   });
 
+  it('ReportViewer Reset restores the opening values and re-runs; optional dropdowns offer "All"', async () => {
+    const seen: unknown[] = [];
+    const tracked: ReportDataSource[] = [{ ...ds[0], data: async ({ parameters }) => (seen.push(parameters.Site), ds[0].data as never) }];
+    const t = { ...template, parameters: [{ name: 'Site', type: 'number' as const, options: [{ value: 1, label: 'Plant A' }, { value: 2, label: 'Plant B' }] }] };
+    const root = await mount(<ReportViewer template={t} dataSources={tracked} />);
+    const select = container.querySelector<HTMLSelectElement>('#er-param-Site')!;
+    expect(select.options[0].textContent).toBe('All');
+
+    // Pick a site and submit, then Reset.
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+      set.call(select, '2');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('.er-params button[type="submit"]')!.click());
+    await act(async () => new Promise((r) => setTimeout(r, 30)));
+    expect(seen.at(-1)).toBe(2);
+
+    const reset = [...container.querySelectorAll<HTMLButtonElement>('.er-params button')].find((b) => b.textContent === 'Reset')!;
+    await act(async () => reset.click());
+    await act(async () => new Promise((r) => setTimeout(r, 30)));
+    expect(container.querySelector<HTMLSelectElement>('#er-param-Site')!.value).toBe('');
+    expect(seen.at(-1) ?? null).toBeNull();
+    root.unmount();
+  });
+
   it('ReportViewer shows the message of a plain-object data error', async () => {
     const failing: ReportDataSource[] = [{ ...ds[0], data: () => Promise.reject({ errorCode: '400', errorMessage: "'from' must be before 'to'." }) }];
     const root = await mount(<ReportViewer template={template} dataSources={failing} />);

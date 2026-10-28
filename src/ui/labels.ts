@@ -28,6 +28,8 @@ export const DEFAULT_LABELS = {
   enterParameters: 'Enter parameter values and press Submit.',
   warnings: 'Warnings',
   selectAll: '(All)',
+  /** Empty choice of an optional single-value parameter (e.g. Site): no filter. */
+  all: 'All',
   yes: 'Yes',
   no: 'No',
 

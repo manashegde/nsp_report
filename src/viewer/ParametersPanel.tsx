@@ -70,7 +70,8 @@ function ParameterInput({ p, value, onChange, all }: { p: ParameterDef; value: u
         id={id}
         value={value === null || value === undefined ? '' : key(value)}
         onChange={(v) => onChange(v === '' ? null : (options.find((o) => key(o.value) === v)?.value ?? v))}
-        options={[{ value: '', label: '' }, ...options.map((o) => ({ value: key(o.value), label: o.label }))]}
+        // An optional filter left empty means "no filter", so say so rather than showing a blank.
+        options={[{ value: '', label: p.required ? '' : labels.all }, ...options.map((o) => ({ value: key(o.value), label: o.label }))]}
       />
     );
   }
@@ -91,11 +92,14 @@ function ParameterInput({ p, value, onChange, all }: { p: ParameterDef; value: u
 export function ParametersPanel({
   parameters,
   values,
+  defaults = values,
   onSubmit,
   validate,
 }: {
   parameters: ParameterDef[];
   values: Record<string, unknown>;
+  /** What Reset restores (and runs): the values the report opened with. Defaults to `values`. */
+  defaults?: Record<string, unknown>;
   onSubmit: (values: Record<string, unknown>) => void;
   /** Messages keyed by parameter name; any message blocks Submit. */
   validate?: (values: Record<string, unknown>) => Record<string, string> | null | undefined;
@@ -105,16 +109,24 @@ export function ParametersPanel({
   const [draft, setDraft] = useState(values);
   useEffect(() => setDraft(values), [values]);
   const visible = parameters.filter((p) => p.visible !== false);
-  const missing = visible.filter((p) => p.required && (draft[p.name] === null || draft[p.name] === undefined || draft[p.name] === ''));
+  const isMissing = (v: Record<string, unknown>) =>
+    visible.some((p) => p.required && (v[p.name] === null || v[p.name] === undefined || v[p.name] === ''));
+  const isInvalid = (v: Record<string, unknown>) => Object.values(validate?.(v) ?? {}).some(Boolean);
+  const missing = isMissing(draft);
   const errors = validate?.(draft) ?? {};
   const invalid = Object.values(errors).some(Boolean);
+  // Reset goes back to the opening values and re-runs the report with them.
+  const reset = () => {
+    setDraft(defaults);
+    if (!isMissing(defaults) && !isInvalid(defaults)) onSubmit(defaults);
+  };
 
   return (
     <form
       className="er-params"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!missing.length && !invalid) onSubmit(draft);
+        if (!missing && !invalid) onSubmit(draft);
       }}
     >
       <div className="er-params__title">{labels.parameters}</div>
@@ -138,10 +150,10 @@ export function ParametersPanel({
         ))}
       </div>
       <div className="er-params__actions">
-        <Button variant="ghost" onClick={() => setDraft(values)}>
+        <Button variant="ghost" onClick={reset}>
           {labels.reset}
         </Button>
-        <Button variant="primary" type="submit" disabled={missing.length > 0 || invalid}>
+        <Button variant="primary" type="submit" disabled={missing || invalid}>
           {labels.submit}
         </Button>
       </div>
