@@ -413,6 +413,19 @@ export const BUILTIN_FUNCTIONS: Record<string, FunctionDef> = {
   coalesce: { fn: (a) => a.find((v) => !isEmpty(v)) ?? null },
   in: { minArgs: 2, fn: (a) => a.slice(1).some((v) => equals(a[0], v)) },
   between: { minArgs: 3, fn: (a) => compare(a[0], a[1]) >= 0 && compare(a[0], a[2]) <= 0 },
+  // Display text of a parameter's chosen option (falls back to the value itself).
+  paramlabel: {
+    minArgs: 1,
+    fn: (a, ctx) => {
+      const name = str(a[0]);
+      const labels = (ctx.vars.parameterlabels ?? {}) as Record<string, string>;
+      const key = Object.keys(labels).find((k) => k.toLowerCase() === name.toLowerCase());
+      if (key) return labels[key];
+      const pk = Object.keys(ctx.params).find((k) => k.toLowerCase() === name.toLowerCase());
+      const v = pk === undefined ? null : ctx.params[pk];
+      return isEmpty(v) ? null : str(v);
+    },
+  },
 
   // String
   upper: { minArgs: 1, fn: (a) => str(a[0]).toUpperCase() },
@@ -580,6 +593,7 @@ export const FUNCTION_CATALOG: { category: string; items: { name: string; signat
       { name: 'Coalesce', signature: 'Coalesce([A], [B], 0)', description: 'First non-empty value.' },
       { name: 'In', signature: "In([Status], 'A', 'B')", description: 'True when the value matches any of the options.' },
       { name: 'Between', signature: 'Between([Qty], 1, 10)', description: 'Inclusive range check.' },
+      { name: 'ParamLabel', signature: "ParamLabel('Site')", description: "Display text of a parameter's chosen option, e.g. the site name for ?Site." },
     ],
   },
   {

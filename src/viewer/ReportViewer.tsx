@@ -100,6 +100,27 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
   const [panelOpen, setPanelOpen] = useState(panelMode === 'open' || (panelMode === 'auto' && visibleParams.length > 0));
 
   /* ---------------- document ---------------- */
+  // Option labels of the chosen values (site name for ?Site) for ParamLabel(), so a header can
+  // name the selection even when it returned no rows.
+  const { parameterLookups } = cfg;
+  const resolveParameterLabels = useCallback(
+    async (values: Record<string, unknown>) => {
+      const out: Record<string, string> = {};
+      const key = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
+      await Promise.all(
+        template.parameters.map(async (p) => {
+          const v = values[p.name];
+          if (v === null || v === undefined || v === '' || Array.isArray(v)) return;
+          const lookup = p.lookup ? parameterLookups?.[p.lookup] : undefined;
+          const options = p.options?.length ? p.options : lookup ? await lookup({ parameters: values, filters: template.dataFilters }) : undefined;
+          const hit = options?.find((o) => key(o.value) === key(v));
+          if (hit) out[p.name] = hit.label;
+        }),
+      );
+      return out;
+    },
+    [template.parameters, template.dataFilters, parameterLookups],
+  );
   const { document: doc, loading, error, refresh } = useReportDocument({
     template,
     data: props.data,
@@ -108,7 +129,11 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
     enabled: !blocked,
     preferSample: props.preferSampleData,
     config: cfg,
+    resolveParameterLabels,
   });
+  // A failed run's message goes away once the parameters are edited, not only on the next run.
+  const [errorDismissed, setErrorDismissed] = useState(false);
+  useEffect(() => setErrorDismissed(false), [error]);
 
   useEffect(() => {
     if (doc) props.onDocumentReady?.(doc);
@@ -265,6 +290,8 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
   const toolbarItems = resolveToolbar(defaults, props.toolbar);
 
   const showEmpty = doc && doc.rows.length === 0 && props.emptyState;
+  // Without a host empty state, say so above the (header-only) pages.
+  const noRows = !!doc && doc.rows.length === 0 && !props.emptyState && !!template.dataSource && !loading && !blocked;
 
   return (
     <ResolvedConfigProvider value={cfg}>
@@ -294,6 +321,8 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
                 values={params}
                 defaults={initialParams}
                 validate={validate}
+                filters={template.dataFilters}
+                onEdit={() => setErrorDismissed(true)}
                 onSubmit={(v) => {
                   setParams(v);
                   props.onParametersChange?.(v);
@@ -303,11 +332,12 @@ export const ReportViewer = forwardRef<ReportViewerHandle, ReportViewerProps>(fu
             </aside>
           )}
           <div className="er-viewer__canvas" ref={scrollRef}>
-            {error && (
+            {error && !errorDismissed && (
               <div className="er-message er-message--error" role="alert">
                 {error.message}
               </div>
             )}
+            {noRows && <div className="er-message er-message--empty">{labels.noData}</div>}
             {!error && missingRequired && <div className="er-message">{labels.enterParameters}</div>}
             {!error && !missingRequired && paramErrors.length > 0 && (
               <div className="er-message er-message--error" role="alert">

@@ -1,6 +1,6 @@
 {
   "name": "@nsplus/easy-report",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Lightweight banded report designer, viewer and exporter (PDF/CSV) for React.",
   "license": "MIT",
   "type": "module",

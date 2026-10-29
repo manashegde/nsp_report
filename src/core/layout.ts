@@ -220,6 +220,11 @@ export interface RenderOptions {
   elementLayouts?: Record<string, ElementLayout>;
   /** Safety valve against runaway layouts. */
   maxPages?: number;
+  /**
+   * Display text of the chosen option per parameter (e.g. the site name for `?Site`), read by
+   * `ParamLabel('Site')`. Lets a header name the selection even when it returned no rows.
+   */
+  parameterLabels?: Record<string, string>;
 }
 
 /** Resolve parameter values: provided → default (`=Expression` defaults are evaluated). */
@@ -364,6 +369,7 @@ class LayoutEngine {
       params: this.params,
       vars: {
         reportname: this.template.name,
+        parameterlabels: this.opts.parameterLabels ?? {},
         pagenumber: this.pages.length,
         groupnumber: inner?.index ?? 1,
         ...extraVars,

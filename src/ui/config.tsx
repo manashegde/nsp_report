@@ -187,6 +187,11 @@ export interface EasyReportConfig {
    * name; the panel shows them under the fields and blocks Submit, and the viewer does not run.
    */
   validateParameters?: (values: Record<string, unknown>, template: ReportTemplate) => Record<string, string> | null | undefined;
+  /**
+   * Earliest / latest date (yyyy-MM-dd) offered by every date parameter's picker; also set as the
+   * input's native min / max. Pair with `validateParameters` for typed-in values.
+   */
+  dateLimits?: { min?: string; max?: string };
   /** Extra expression functions. */
   functions?: Record<string, HostFunction | FunctionDef>;
   elementTypes?: ElementTypeDef[];

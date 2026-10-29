@@ -25,7 +25,12 @@ function fromInputValue(p: ParameterDef, s: string): unknown {
 
 const key = (v: unknown) => (v instanceof Date ? formatValue(v, 'yyyy-MM-dd') : String(v));
 
-function useOptions(p: ParameterDef, lookups: Record<string, ParameterLookup> | undefined, values: Record<string, unknown>) {
+function useOptions(
+  p: ParameterDef,
+  lookups: Record<string, ParameterLookup> | undefined,
+  values: Record<string, unknown>,
+  filters: Record<string, unknown> | undefined,
+) {
   const [opts, setOpts] = useState<ParameterOption[] | undefined>(p.options?.length ? p.options : undefined);
   const lookup = p.lookup ? lookups?.[p.lookup] : undefined;
   useEffect(() => {
@@ -34,20 +39,33 @@ function useOptions(p: ParameterDef, lookups: Record<string, ParameterLookup> | 
       return;
     }
     let live = true;
-    Promise.resolve(lookup({ parameters: values })).then((o) => live && setOpts(o));
+    // The report's design-time selection (e.g. its tags) lets a lookup offer only relevant options.
+    Promise.resolve(lookup({ parameters: values, filters })).then((o) => live && setOpts(o));
     return () => {
       live = false;
     };
     // Lookups may depend on other parameter values (cascading).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lookup, p.options, JSON.stringify(values)]);
+  }, [lookup, p.options, JSON.stringify(values), JSON.stringify(filters)]);
   return opts;
 }
 
-function ParameterInput({ p, value, onChange, all }: { p: ParameterDef; value: unknown; onChange: (v: unknown) => void; all: Record<string, unknown> }) {
-  const { components, labels, parameterLookups } = useER();
+function ParameterInput({
+  p,
+  value,
+  onChange,
+  all,
+  filters,
+}: {
+  p: ParameterDef;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  all: Record<string, unknown>;
+  filters?: Record<string, unknown>;
+}) {
+  const { components, labels, parameterLookups, dateLimits } = useER();
   const { Input, Select, Checkbox } = components;
-  const options = useOptions(p, parameterLookups, all);
+  const options = useOptions(p, parameterLookups, all, filters);
   const id = `er-param-${p.name}`;
 
   if (options) {
@@ -85,6 +103,9 @@ function ParameterInput({ p, value, onChange, all }: { p: ParameterDef; value: u
       value={toInputValue(p, value)}
       onChange={(s) => onChange(fromInputValue(p, s))}
       placeholder={p.required ? labels.required : ''}
+      required={p.required}
+      min={p.type === 'date' ? dateLimits?.min : undefined}
+      max={p.type === 'date' ? dateLimits?.max : undefined}
     />
   );
 }
@@ -95,11 +116,17 @@ export function ParametersPanel({
   defaults = values,
   onSubmit,
   validate,
+  filters,
+  onEdit,
 }: {
   parameters: ParameterDef[];
   values: Record<string, unknown>;
   /** What Reset restores (and runs): the values the report opened with. Defaults to `values`. */
   defaults?: Record<string, unknown>;
+  /** The template's design-time selection, passed to lookups. */
+  filters?: Record<string, unknown>;
+  /** Called whenever a value is changed in the panel. */
+  onEdit?: () => void;
   onSubmit: (values: Record<string, unknown>) => void;
   /** Messages keyed by parameter name; any message blocks Submit. */
   validate?: (values: Record<string, unknown>) => Record<string, string> | null | undefined;
@@ -139,7 +166,16 @@ export function ParametersPanel({
                 {p.required && <span className="er-required">*</span>}
               </label>
             ) : null}
-            <ParameterInput p={p} value={draft[p.name]} all={draft} onChange={(v) => setDraft((d) => ({ ...d, [p.name]: v }))} />
+            <ParameterInput
+              p={p}
+              value={draft[p.name]}
+              all={draft}
+              filters={filters}
+              onChange={(v) => {
+                setDraft((d) => ({ ...d, [p.name]: v }));
+                onEdit?.();
+              }}
+            />
             {errors[p.name] && (
               <div className="er-field__error" role="alert">
                 {errors[p.name]}

@@ -15,6 +15,8 @@ export interface UseReportDocumentOptions {
   /** Use data source sampleData (designer preview). */
   preferSample?: boolean;
   config?: Pick<EasyReportConfig, 'functions' | 'locale' | 'currency' | 'measurer' | 'elementTypes'>;
+  /** Display text of the chosen parameter options (for `ParamLabel`); fetched alongside the data. */
+  resolveParameterLabels?: (parameters: Record<string, unknown>) => Promise<Record<string, string>>;
 }
 
 export interface ReportDocumentState {
@@ -43,9 +45,12 @@ export function useReportDocument(opts: UseReportDocumentOptions): ReportDocumen
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: null }));
     (async () => {
-      const { config } = optsRef.current;
+      const { config, resolveParameterLabels } = optsRef.current;
       const ds = dataSources?.find((d) => d.name === template.dataSource);
+      // A label lookup that fails just leaves ParamLabel() on the raw value.
+      const labelsPromise = resolveParameterLabels ? resolveParameterLabels(parameters).catch(() => ({})) : Promise.resolve({});
       const rows = data ? prepareRows(data, getFields(ds, template.dataFilters)) : await loadData(ds, { parameters, filters: template.dataFilters, signal: ctrl.signal }, preferSample);
+      const parameterLabels = await labelsPromise;
       if (cancelled) return;
       // Yield so the loading indicator paints before a potentially long layout.
       await new Promise((r) => setTimeout(r, 0));
@@ -59,6 +64,7 @@ export function useReportDocument(opts: UseReportDocumentOptions): ReportDocumen
         currency: config?.currency,
         measurer: config?.measurer,
         elementLayouts,
+        parameterLabels,
       });
       if (!cancelled) setState({ document: doc, loading: false, error: null });
     })().catch((e: unknown) => {

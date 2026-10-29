@@ -88,6 +88,52 @@ describe('React components', () => {
     root.unmount();
   });
 
+  it('ReportViewer names the chosen option with ParamLabel even when no rows come back, and says there is no data', async () => {
+    const lookupCalls: unknown[] = [];
+    const empty: ReportDataSource[] = [{ ...ds[0], data: async () => [] }];
+    const t = {
+      ...template,
+      dataFilters: { tagIds: ['a'] },
+      parameters: [{ name: 'Site', type: 'number' as const, lookup: 'sites', defaultValue: 7 }],
+      bands: {
+        ...template.bands,
+        reportHeader: {
+          id: 'rh',
+          height: 30,
+          elements: [{ id: 'h', type: 'text' as const, x: 0, y: 0, width: 300, height: 20, text: "{Iif(IsNull(?Site, 0) = 0, 'All sites', ParamLabel('Site'))} · Oct" }],
+        },
+      },
+    };
+    const sites = async (ctx: { filters?: Record<string, unknown> }) => (lookupCalls.push(ctx.filters), [{ value: 7, label: 'Plant A' }]);
+    const root = await mount(<ReportViewer template={t} dataSources={empty} config={{ parameterLookups: { sites }, labels: { noData: 'No data for the selected range' } }} />);
+    expect(container.querySelector('.er-page-frame')?.textContent).toContain('Plant A · Oct');
+    expect(container.querySelector('.er-message--empty')?.textContent).toBe('No data for the selected range');
+    expect(lookupCalls).toContainEqual({ tagIds: ['a'] });
+    root.unmount();
+  });
+
+  it('ReportViewer date inputs carry required and the configured min / max', async () => {
+    const t = { ...template, parameters: [{ name: 'From', type: 'date' as const, required: true, defaultValue: '2026-10-01' }] };
+    const root = await mount(<ReportViewer template={t} dataSources={ds} config={{ dateLimits: { min: '2000-01-01', max: '2026-10-28' } }} />);
+    const input = container.querySelector<HTMLInputElement>('#er-param-From')!;
+    expect([input.required, input.min, input.max]).toEqual([true, '2000-01-01', '2026-10-28']);
+    root.unmount();
+  });
+
+  it('ReportViewer hides a failed run\'s message once a parameter is edited', async () => {
+    const failing: ReportDataSource[] = [{ ...ds[0], data: () => Promise.reject(new Error('Bad range')) }];
+    const t = { ...template, parameters: [{ name: 'Note', type: 'string' as const, defaultValue: 'x' }] };
+    const root = await mount(<ReportViewer template={t} dataSources={failing} />);
+    expect(container.querySelector('.er-message--error')?.textContent).toBe('Bad range');
+    const input = container.querySelector<HTMLInputElement>('#er-param-Note')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'y');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector('.er-message--error')).toBeNull();
+    root.unmount();
+  });
+
   it('ReportViewer shows the message of a plain-object data error', async () => {
     const failing: ReportDataSource[] = [{ ...ds[0], data: () => Promise.reject({ errorCode: '400', errorMessage: "'from' must be before 'to'." }) }];
     const root = await mount(<ReportViewer template={template} dataSources={failing} />);

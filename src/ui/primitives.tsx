@@ -37,9 +37,11 @@ export interface InputProps {
   style?: CSSProperties;
   autoFocus?: boolean;
   id?: string;
-  min?: number;
-  max?: number;
+  /** Numbers for number inputs, yyyy-MM-dd for date inputs. */
+  min?: number | string;
+  max?: number | string;
   step?: number;
+  required?: boolean;
 }
 
 export interface SelectProps {
@@ -114,7 +116,7 @@ function DefaultButton({ children, onClick, variant = 'default', disabled, title
   );
 }
 
-function DefaultInput({ value, onChange, onCommit, placeholder, type = 'text', disabled, invalid, title, className, style, autoFocus, id, min, max, step }: InputProps) {
+function DefaultInput({ value, onChange, onCommit, placeholder, type = 'text', disabled, invalid, title, className, style, autoFocus, id, min, max, step, required }: InputProps) {
   // Local state lets number inputs hold intermediate values like "-" or "1." while typing.
   const [local, setLocal] = useState(value);
   const focused = useRef(false);
@@ -135,6 +137,7 @@ function DefaultInput({ value, onChange, onCommit, placeholder, type = 'text', d
       min={min}
       max={max}
       step={step}
+      required={required}
       onFocus={() => (focused.current = true)}
       onChange={(e) => {
         setLocal(e.target.value);
